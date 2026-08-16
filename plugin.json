@@ -1,0 +1,13 @@
+{
+    "id": "cosmicstream",
+    "version": "1.2",
+    "type": "ecmascript",
+    "author": "cosminneamtiu",
+    "showtimeVersion": "7.0.157",
+    "title": "CosmicStream",
+    "synopsis": "Universal multimedia search plugin with TMDB browsing",
+    "description": "Search movies, TV shows, anime, and cartoons from multiple English sources at once. CosmicStream features trending shows/movies, seasons, episodes and last-watched resume.",
+    "category": "video",
+    "icon": "img/cosmicstream_logo.png",
+    "file": "main.js"
+}
