@@ -91,6 +91,18 @@ exports.clear = function() {
   save([]);
 };
 
+exports.updateIcon = function(title, icon) {
+  var list = getAll();
+  var changed = false;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].title === title && list[i].icon !== icon) {
+      list[i].icon = icon;
+      changed = true;
+    }
+  }
+  if (changed) save(list);
+};
+
 exports.advanceEpisode = function(title, icon) {
   var rec = exports.get(title);
   if (!rec) return null;

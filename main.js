@@ -184,6 +184,43 @@ function searchAddons(p, query, logoUrl, context) {
     return total;
 }
 
+function resolveHistoryIcon(h) {
+    // If the history record already has a valid TMDB icon URL, use it
+    if (h.icon && h.icon.indexOf('image.tmdb.org') !== -1) return h.icon;
+
+    try {
+        if (h.type === 'show') {
+            // For TV shows: use the show's poster (portrait art)
+            var show = metadata.resolveShow(h.title);
+            if (show) {
+                if (show.poster_path) return 'https://image.tmdb.org/t/p/w300' + show.poster_path;
+                if (show.backdrop_path) return 'https://image.tmdb.org/t/p/w780' + show.backdrop_path;
+            }
+        } else if (h.type === 'movie') {
+            // For movies: get the movie poster
+            var md = metadata.getMovieDetails(h.title);
+            if (md && md.poster) return md.poster;
+            if (md && md.backdrop) return md.backdrop;
+        }
+    } catch(e) {
+        console.log('Failed to resolve icon for: ' + h.title + ' | ' + e);
+    }
+    return '';
+}
+
+function resolveHistoryBackdrop(h) {
+    try {
+        if (h.type === 'show') {
+            var show = metadata.resolveShow(h.title);
+            if (show && show.backdrop_path) return 'https://image.tmdb.org/t/p/w1280' + show.backdrop_path;
+        } else if (h.type === 'movie') {
+            var md = metadata.getMovieDetails(h.title);
+            if (md && md.backdrop) return md.backdrop;
+        }
+    } catch(e) {}
+    return '';
+}
+
 new page.Route(plugin.id + ':start', function(p) {
     setHeader(p, plugin.title);
     p.model.contents = 'grid';
@@ -191,7 +228,12 @@ new page.Route(plugin.id + ':start', function(p) {
 
     var lastWatched = history.getAll().slice(0, 5);
     if (lastWatched.length > 0) {
-        p.appendItem('', 'separator', { title: 'Last Watched' });
+        // Use the first watched item's backdrop as the page background
+        var bgIcon = resolveHistoryBackdrop(lastWatched[0]);
+        if (bgIcon && p.metadata) {
+            p.metadata.background = bgIcon;
+        }
+        p.appendItem('', 'separator', { title: 'Continue Watching' });
         for (var i = 0; i < lastWatched.length; i++) {
             var h = lastWatched[i];
             var url, label;
@@ -203,9 +245,15 @@ new page.Route(plugin.id + ':start', function(p) {
                 label = 'S' + pad(h.season) + 'E' + pad(h.episode);
                 if (h.episodeTitle) label += ' - ' + h.episodeTitle;
             }
+            // Resolve TMDB poster for this history item
+            var historyIcon = resolveHistoryIcon(h);
+            // Cache the resolved icon back into history so future loads are instant
+            if (historyIcon && (!h.icon || h.icon.indexOf('image.tmdb.org') === -1)) {
+                history.updateIcon(h.title, historyIcon);
+            }
             var item = p.appendItem(url, 'video', {
                 title: label,
-                icon: h.icon || logo
+                icon: historyIcon || logo
             });
             (function(t, pageRef) {
                 item.addOptAction('Remove from Last Watched', function() {
@@ -459,9 +507,11 @@ new page.Route(plugin.id + ':play:(.*):(.*):(.*):(.*):(.*)', function(p, searchE
 
     if (title) {
         if (season > 0 && episode > 0) {
-            history.add(title, 'show', '', season, episode, episodeTitle, false);
+            var playIcon = resolveHistoryIcon({ title: title, type: 'show', season: season, episode: episode });
+            history.add(title, 'show', playIcon || '', season, episode, episodeTitle, false);
         } else {
-            history.add(title, 'movie', '', 0, 0, '', false);
+            var playIcon = resolveHistoryIcon({ title: title, type: 'movie' });
+            history.add(title, 'movie', playIcon || '', 0, 0, '', false);
         }
     }
 
@@ -497,7 +547,8 @@ new page.Route(plugin.id + ':playtorrent:(.*):(.*):(.*):(.*):(.*)', function(p, 
     var episodeTitle = decodeURIComponent(epTitleEnc);
 
     if (title && season > 0 && episode > 0) {
-        history.add(title, 'show', '', season, episode, episodeTitle, false, magnet);
+        var torrentIcon = resolveHistoryIcon({ title: title, type: 'show', season: season, episode: episode });
+        history.add(title, 'show', torrentIcon || '', season, episode, episodeTitle, false, magnet);
     }
 
     var vparams = 'videoparams:' + JSON.stringify({
@@ -530,9 +581,13 @@ new page.Route(plugin.id + ':history', function(p) {
                 label = 'S' + pad(h.season) + 'E' + pad(h.episode);
                 if (h.episodeTitle) label += ' - ' + h.episodeTitle;
             }
+            var hIcon = resolveHistoryIcon(h);
+            if (hIcon && (!h.icon || h.icon.indexOf('image.tmdb.org') === -1)) {
+                history.updateIcon(h.title, hIcon);
+            }
             var item = p.appendItem(url, 'video', {
                 title: label,
-                icon: h.icon || logo
+                icon: hIcon || logo
             });
             (function(t, pageRef) {
                 item.addOptAction('Remove from history', function() {
