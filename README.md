@@ -20,17 +20,27 @@ It brings TMDB-powered browsing (trending movies, popular TV shows, seasons & ep
 
 ---
 
+## Downloads & Releases
+
+CosmicStream packages are now **automatically built and released via GitHub Actions CI/CD** on every update.
+
+- Download the latest pre-built `cosmicstream.zip` directly from [**GitHub Releases**](https://github.com/cosminneamtiu/streamnet/releases/latest).
+
+---
+
 ## Installation on M7 Movian (PS3)
 
 You can install CosmicStream on your PS3 running M7 Movian using any of the following methods:
 
 ### Method 1: Direct USB Installation (Recommended)
 
-1. **Package the plugin as a ZIP archive**:
-   Zip all files so that `plugin.json` is located in the **root** of the archive (do not enclose them inside a subfolder):
-   ```bash
-   zip -r cosmicstream.zip plugin.json main.js metadata.js history.js addons/ img/
-   ```
+1. **Download or build the plugin package**:
+   - Download the latest `cosmicstream.zip` from [**Releases**](https://github.com/cosminneamtiu/streamnet/releases/latest).
+   - *Alternatively, to build manually*:
+     ```bash
+     zip -r cosmicstream.zip plugin.json main.js metadata.js history.js addons/ img/
+     ```
+     Ensure all files are placed in the root of the ZIP (do not nest inside an extra subfolder).
 2. **Copy to USB**:
    - Copy `cosmicstream.zip` to a FAT32-formatted USB flash drive.
 3. **Install in Movian**:
@@ -46,9 +56,9 @@ You can install CosmicStream on your PS3 running M7 Movian using any of the foll
 
 If your PS3 and PC are on the same local Wi-Fi or LAN network:
 
-1. **Package and host the zip file**:
+1. **Download/Host the zip file**:
+   - Place the downloaded `cosmicstream.zip` in your directory and start a simple web server:
    ```bash
-   zip -r cosmicstream.zip plugin.json main.js metadata.js history.js addons/ img/
    python3 -m http.server 8000
    ```
 2. **Install from Movian browser**:
