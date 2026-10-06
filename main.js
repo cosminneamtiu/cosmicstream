@@ -2,6 +2,7 @@ var page     = require('movian/page');
 var service  = require('movian/service');
 var settings = require('movian/settings');
 var popup    = require('native/popup');
+var prop     = require('movian/prop');
 
 var videoscrobbler = null;
 try {
@@ -18,6 +19,7 @@ var shanaproject = require('./addons/shanaproject');
 var bflix_tpb    = require('./addons/bflix_tpb');
 var nekobt       = require('./addons/nekobt');
 var nyaa         = require('./addons/nyaa');
+var torrentio    = require('./addons/torrentio');
 var metadata     = require('./metadata');
 var history      = require('./history');
 
@@ -26,6 +28,10 @@ var ADDONS = [
 ];
 
 var addonEnabled = {};
+var torrentioEnabled = true;
+var torrentioPs3Filter = true;
+
+var startPageContinue = { page: null, items: [], anchor: null };
 
 service.create(plugin.title, plugin.id + ':start', 'video', true, logo);
 
@@ -36,6 +42,8 @@ settings.createBool('cosmicstream_addon_shanaproject', 'Shana Project — Anime'
 settings.createBool('cosmicstream_addon_bflix',        'The Pirate Bay — Torrents',  true, function(v) { addonEnabled['bflix-piratebay'] = v; });
 settings.createBool('cosmicstream_addon_nekobt',       'NekoBT — Anime',             true, function(v) { addonEnabled['nekobt']       = v; });
 settings.createBool('cosmicstream_addon_nyaa',         'Nyaa — Anime Torrents',      true, function(v) { addonEnabled['nyaa']         = v; });
+settings.createBool('cosmicstream_addon_torrentio',    'Torrentio — Aggregated torrents', true, function(v) { torrentioEnabled = v; });
+settings.createBool('cosmicstream_torrentio_ps3filter', 'Torrentio — PS3-compatible streams only', true, function(v) { torrentioPs3Filter = v; });
 
 settings.createDivider('Interface');
 settings.createBool('cosmicstream_filter_adult', 'Filter adult content', true, function(v) {
@@ -96,6 +104,8 @@ if (videoscrobbler) {
     if (service.autoAdvance !== false) {
         history.advanceEpisode(title, '');
     }
+
+    refreshContinueWatching();
     };
 }
 
@@ -111,6 +121,154 @@ function setHeader(p, title) {
     }
     p.type     = 'directory';
     p.contents = 'items';
+}
+
+function textValue(v) {
+    if (!v) return '';
+    if (typeof v === 'string') return v;
+    if (v.str) return v.str;
+    return String(v);
+}
+
+function extractSeeders(title, description) {
+    var text = textValue(title) + ' ' + textValue(description);
+    var m = text.match(/\bSeeders[\s:]*(\d+)\b/i);
+    if (m) return parseInt(m[1], 10) || 0;
+    m = text.match(/\bS\s*:\s*(\d+)\b/);
+    if (m) return parseInt(m[1], 10) || 0;
+    m = text.match(/👤\s*(\d+)/);
+    if (m) return parseInt(m[1], 10) || 0;
+    return 0;
+}
+
+function convertMagnetUrl(url, context) {
+    if (!url || url.indexOf('magnet:') !== 0) return url;
+    if (context && context.title) {
+        return plugin.id + ':playtorrent:' +
+            encodeURIComponent(url) + ':' +
+            encodeURIComponent(context.title) + ':' +
+            (context.season || 0) + ':' +
+            (context.episode || 0) + ':' +
+            encodeURIComponent(context.episodeTitle || '');
+    }
+    return 'videoparams:' + JSON.stringify({
+        title: context && context.title ? context.title : '',
+        canonicalUrl: context && context.canonicalUrl ? context.canonicalUrl : '',
+        no_fs_scan: true,
+        sources: [{ url: 'torrent:video:' + url }]
+    });
+}
+
+function collectMergedStreams(p, searchQuery, context) {
+    var collected = [];
+    var proxy = Object.create(p);
+
+    var dummyItem = { addOptAction: function() { return dummyItem; } };
+
+    proxy.appendItem = function(url, type, options) {
+        if (type !== 'video') return dummyItem;
+        var opts = options || {};
+        var seeders = extractSeeders(opts.title, opts.description);
+        var playUrl = convertMagnetUrl(url, context);
+        collected.push({
+            url: playUrl,
+            title: opts.title,
+            description: opts.description,
+            icon: opts.icon,
+            seeders: seeders
+        });
+        return dummyItem;
+    };
+
+    proxy.appendPassiveItem = function() { return dummyItem; };
+
+    for (var i = 0; i < ADDONS.length; i++) {
+        var a = ADDONS[i];
+        if (addonEnabled[a.id] === false) continue;
+        try { a.search(proxy, searchQuery, logo, false); } catch(e) {
+            console.log('Addon search error (' + a.id + '): ' + e);
+        }
+    }
+
+    if (torrentioEnabled) {
+        try {
+            var tType = (context.season > 0 && context.episode > 0) ? 'series' : 'movie';
+            torrentio.addStreams(proxy, context.title, tType, context.season, context.episode,
+                context.episodeTitle, context.canonicalUrl, torrentioPs3Filter);
+        } catch(e) {
+            console.log('Torrentio error: ' + e);
+        }
+    }
+
+    collected.sort(function(a, b) { return b.seeders - a.seeders; });
+
+    for (var j = 0; j < collected.length; j++) {
+        var it = collected[j];
+        p.appendItem(it.url, 'video', {
+            title: it.title,
+            description: it.description,
+            icon: it.icon || logo
+        });
+    }
+
+    return collected.length;
+}
+
+function refreshContinueWatching() {
+    if (!startPageContinue.page) return;
+    try {
+        if (prop.isZombie(startPageContinue.page.model.nodes)) return;
+    } catch(e) { return; }
+
+    var p = startPageContinue.page;
+
+    for (var i = 0; i < startPageContinue.items.length; i++) {
+        try { startPageContinue.items[i].destroy(); } catch(e) {}
+    }
+    startPageContinue.items = [];
+
+    var lastWatched = history.getAll().slice(0, 5);
+    if (lastWatched.length === 0) return;
+
+    var bgIcon = resolveHistoryBackdrop(lastWatched[0]);
+    if (bgIcon && p.metadata) p.metadata.background = bgIcon;
+
+    var sep = p.appendItem('', 'separator', { title: 'Continue Watching' });
+    startPageContinue.items.push(sep);
+
+    for (var j = 0; j < lastWatched.length; j++) {
+        var h = lastWatched[j];
+        var url, label;
+        if (h.type === 'movie') {
+            url = plugin.id + ':details:' + encodeURIComponent(h.title) + ':movie';
+            label = h.title;
+        } else {
+            url = plugin.id + ':continue:' + encodeURIComponent(h.title);
+            label = 'S' + pad(h.season) + 'E' + pad(h.episode);
+            if (h.episodeTitle) label += ' - ' + h.episodeTitle;
+        }
+        var historyIcon = h.icon || resolveHistoryIcon(h);
+        if (historyIcon && (!h.icon || h.icon.indexOf('image.tmdb.org') === -1)) {
+            history.updateIcon(h.title, historyIcon);
+        }
+        var item = p.appendItem(url, 'video', {
+            title: label,
+            icon: historyIcon || logo
+        });
+        (function(t) {
+            item.addOptAction('Remove from Last Watched', function() {
+                history.remove(t);
+                refreshContinueWatching();
+            });
+        })(h.title);
+        startPageContinue.items.push(item);
+    }
+
+    if (startPageContinue.anchor) {
+        for (var k = 0; k < startPageContinue.items.length; k++) {
+            try { startPageContinue.items[k].moveBefore(startPageContinue.anchor); } catch(e) {}
+        }
+    }
 }
 
 function buildEpisodeQuery(title, season, episode) {
@@ -222,10 +380,20 @@ function resolveHistoryBackdrop(h) {
 }
 
 new page.Route(plugin.id + ':start', function(p) {
-    setHeader(p, plugin.title);
+    setHeader(p, 'Loading...');
     p.model.contents = 'grid';
     p.loading = true;
 
+    // Reset the live section refs for this start-page instance
+    startPageContinue.page = p;
+    startPageContinue.items = [];
+    startPageContinue.anchor = null;
+
+    // === SEARCH BAR — always first ===
+    p.appendItem(plugin.id + ':find:', 'search', { title: 'Search shows & movies...' });
+    p.appendItem('', 'separator', { title: '' });
+
+    // === CONTINUE WATCHING ===
     var lastWatched = history.getAll().slice(0, 5);
     if (lastWatched.length > 0) {
         // Use the first watched item's backdrop as the page background
@@ -255,43 +423,79 @@ new page.Route(plugin.id + ':start', function(p) {
                 title: label,
                 icon: historyIcon || logo
             });
-            (function(t, pageRef) {
+            startPageContinue.items.push(item);
+            (function(t) {
                 item.addOptAction('Remove from Last Watched', function() {
                     history.remove(t);
-                    pageRef.redirect(plugin.id + ':start');
+                    refreshContinueWatching();
                 });
-            })(h.title, p);
+            })(h.title);
         }
     }
 
-    p.appendItem(plugin.id + ':find:', 'search', { title: 'Search shows & movies...' });
-    p.appendItem(plugin.id + ':search:', 'search', { title: 'Search torrents directly...' });
-    p.appendItem(plugin.id + ':history', 'video', { title: 'Watch History', icon: logo });
+    // === RECOMMENDATIONS (based on most recent watched item) ===
+    var recAnchor = null;
+    if (lastWatched.length > 0) {
+        var recSource = lastWatched[0];
+        try {
+            var recs = metadata.getRecommendations(recSource.title, recSource.type);
+            if (recs.length > 0) {
+                recAnchor = p.appendItem('', 'separator', { title: 'Because you watched ' + recSource.title });
+                p.appendItem('', 'separator', { title: '' });
+                for (var ri = 0; ri < recs.length; ri++) {
+                    var rec = recs[ri];
+                    var recUrl = rec.type === 'movie'
+                        ? plugin.id + ':details:' + encodeURIComponent(rec.title) + ':movie'
+                        : plugin.id + ':show:' + encodeURIComponent(rec.title);
+                    p.appendItem(recUrl, 'video', { title: rec.title, icon: rec.icon || logo });
+                }
+            }
+        } catch(e) {
+            console.log('Recommendations error: ' + e);
+        }
+    }
 
-    p.appendItem('', 'separator', { title: 'Trending Shows' });
+    // === TRENDING SHOWS ===
+    if (p.metadata) p.metadata.title = 'Loading shows...';
+    var trendingAnchor = p.appendItem('', 'separator', { title: 'Trending Shows' });
+    p.appendItem('', 'separator', { title: '' });
     try {
         var shows = metadata.getPopularShows(1).slice(0, 20);
         for (var s = 0; s < shows.length; s++) {
             var sh = shows[s];
-            var u = plugin.id + ':show:' + encodeURIComponent(sh.title);
-            p.appendItem(u, 'video', { title: sh.title, icon: sh.icon || logo });
+            p.appendItem(
+                plugin.id + ':show:' + encodeURIComponent(sh.title),
+                'video', { title: sh.title, icon: sh.icon || logo }
+            );
         }
     } catch(e) {
         console.log('Trending shows error: ' + e);
     }
 
+    // === TRENDING MOVIES ===
+    if (p.metadata) p.metadata.title = 'Loading movies...';
     p.appendItem('', 'separator', { title: 'Trending Movies' });
+    p.appendItem('', 'separator', { title: '' });
     try {
         var movies = metadata.getPopularMovies(1).slice(0, 20);
         for (var m = 0; m < movies.length; m++) {
             var mv = movies[m];
-            var u2 = plugin.id + ':details:' + encodeURIComponent(mv.title) + ':movie';
-            p.appendItem(u2, 'video', { title: mv.title, icon: mv.icon || logo });
+            p.appendItem(
+                plugin.id + ':details:' + encodeURIComponent(mv.title) + ':movie',
+                'video', { title: mv.title, icon: mv.icon || logo }
+            );
         }
     } catch(e) {
         console.log('Trending movies error: ' + e);
     }
 
+    // === WATCH HISTORY — at the very bottom ===
+    p.appendItem('', 'separator', { title: '' });
+    p.appendItem(plugin.id + ':history', 'video', { title: 'Watch History', icon: logo });
+
+    startPageContinue.anchor = recAnchor || trendingAnchor;
+
+    if (p.metadata) p.metadata.title = plugin.title;
     p.loading = false;
 });
 
@@ -527,7 +731,7 @@ new page.Route(plugin.id + ':play:(.*):(.*):(.*):(.*):(.*)', function(p, searchE
 
     var total = 0;
     try {
-        total = searchAddons(p, searchQuery, logo, context);
+        total = collectMergedStreams(p, searchQuery, context);
     } catch(e) {
         console.log('Play route error: ' + e);
     }

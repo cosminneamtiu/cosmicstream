@@ -86,12 +86,12 @@ function buildResult(item, forceType) {
   };
 }
 
-function fetchPage(apiUrl) {
+function fetchPage(apiUrl, forceType) {
   var json = req(apiUrl);
   if (!json || !json.results) return [];
   var out = [];
   for (var i = 0; i < json.results.length; i++) {
-    var r = buildResult(json.results[i]);
+    var r = buildResult(json.results[i], forceType);
     if (r) out.push(r);
   }
   return out;
@@ -113,7 +113,7 @@ exports.getPopularShows = function(pages) {
   var out = [];
   for (var p = 1; p <= pages; p++) {
     var url = BASE + '/tv/popular?api_key=' + API_KEY + '&page=' + p;
-    var list = fetchPage(url);
+    var list = fetchPage(url, 'tv');
     for (var i = 0; i < list.length; i++) {
       if (list[i].type === 'show') out.push(list[i]);
     }
@@ -126,7 +126,7 @@ exports.getPopularMovies = function(pages) {
   var out = [];
   for (var p = 1; p <= pages; p++) {
     var url = BASE + '/movie/popular?api_key=' + API_KEY + '&page=' + p;
-    var list = fetchPage(url);
+    var list = fetchPage(url, 'movie');
     for (var i = 0; i < list.length; i++) {
       if (list[i].type === 'movie') out.push(list[i]);
     }
@@ -272,5 +272,53 @@ exports.computeNextEpisode = function(titleWithYear, seasonNumber, episodeNumber
   return { season: nextSeason, episode: first.episode_number, title: first.name || ('Episode ' + first.episode_number) };
 };
 
+exports.getRecommendations = function(titleWithYear, mediaType) {
+  var py = parseTitleYear(titleWithYear);
+  var tmdbType = mediaType === 'show' ? 'tv' : 'movie';
+  var searchUrl = BASE + '/search/' + tmdbType + '?api_key=' + API_KEY + '&query=' + encodeURIComponent(py.title);
+  if (py.year) searchUrl += '&year=' + py.year;
+  var searchJson = req(searchUrl);
+  if (!searchJson || !searchJson.results || !searchJson.results.length) return [];
+
+  var id = searchJson.results[0].id;
+  var recUrl = BASE + '/' + tmdbType + '/' + id + '/recommendations?api_key=' + API_KEY;
+  var recJson = req(recUrl);
+  if (!recJson || !recJson.results) return [];
+
+  var out = [];
+  for (var i = 0; i < Math.min(8, recJson.results.length); i++) {
+    var item = recJson.results[i];
+    var r = buildResult(item, tmdbType);
+    if (r) out.push(r);
+  }
+  return out;
+};
+
 exports.resolveShow = resolveShow;
 exports.parseTitleYear = parseTitleYear;
+
+exports.getMovieImdbId = function(titleWithYear) {
+  var py = parseTitleYear(titleWithYear);
+  var url = BASE + '/search/movie?api_key=' + API_KEY + '&query=' + encodeURIComponent(py.title);
+  if (py.year) url += '&year=' + py.year;
+  var json = req(url);
+  if (!json || !json.results || !json.results.length) return null;
+  var movie = null;
+  for (var i = 0; i < json.results.length; i++) {
+    var r = json.results[i];
+    if (isAdultFiltered(r)) continue;
+    var y = r.release_date ? r.release_date.substring(0, 4) : null;
+    if (!movie && (!py.year || y === py.year)) movie = r;
+  }
+  if (!movie) movie = json.results[0];
+
+  var ext = req(BASE + '/movie/' + movie.id + '/external_ids?api_key=' + API_KEY);
+  return ext && ext.imdb_id ? ext.imdb_id : null;
+};
+
+exports.getShowImdbId = function(titleWithYear) {
+  var show = resolveShow(titleWithYear);
+  if (!show || !show.id) return null;
+  var ext = req(BASE + '/tv/' + show.id + '/external_ids?api_key=' + API_KEY);
+  return ext && ext.imdb_id ? ext.imdb_id : null;
+};

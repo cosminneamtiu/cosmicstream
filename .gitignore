@@ -1,0 +1,19 @@
+# Movian build / bundle release zips
+*.zip
+
+# Screenshots & mockup images
+Screenshot_*.png
+M7.png
+M7_1.png
+
+# Editor & AI tool configs
+opencode.json
+.vscode/
+.idea/
+
+# OS metadata & temporary files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+*.log
