@@ -1,0 +1,35 @@
+name: Release CosmicStream
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract plugin version
+        id: get_version
+        run: |
+          VERSION=$(jq -r '.version' plugin.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Package plugin zip
+        run: |
+          zip -r cosmicstream.zip plugin.json main.js metadata.js history.js addons/ img/
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.get_version.outputs.version }}"
+          name: "CosmicStream v${{ steps.get_version.outputs.version }}"
+          files: cosmicstream.zip
+          generate_release_notes: true
