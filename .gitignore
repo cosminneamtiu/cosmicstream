@@ -17,3 +17,6 @@ Thumbs.db
 *.swp
 *~
 *.log
+
+# Legacy / alternative plugins
+streamian_stable/
